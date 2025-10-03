@@ -1,0 +1,16 @@
+[package]
+name = "FeeCollector"
+version = "1.0.0"
+authors = ["AptosSend Team"]
+upgrade_policy = "compatible"
+
+[addresses]
+fee_collector = "_"
+
+[dev-addresses]
+fee_collector = "0xa59f81b8d890df161743b64101f62bba9bd5f35071476849f168651e3788f583"
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "main" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-stdlib", rev = "main" }
+MoveStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/move-stdlib", rev = "main" }
