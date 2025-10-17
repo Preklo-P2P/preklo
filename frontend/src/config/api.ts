@@ -71,17 +71,22 @@ export const api = {
         
         // Handle 401 Unauthorized - token expired or invalid
         if (response.status === 401) {
-          // Clear expired token and redirect to login
-          localStorage.removeItem('preklo_access_token');
-          localStorage.removeItem('preklo_refresh_token');
-          localStorage.removeItem('preklo_username');
-          localStorage.removeItem('preklo_email');
-          localStorage.removeItem('preklo_wallet_address');
-          localStorage.removeItem('preklo_user_id');
-          
-          // Redirect to login page
-          window.location.href = '/landing#top';
-          throw new Error('Session expired. Please log in again.');
+          // Only logout if it's actually an authentication issue, not a transaction error
+          const errorMessage = errorData.error?.message || errorData.detail || '';
+          if (errorMessage.includes('Authentication') || errorMessage.includes('token') || errorMessage.includes('unauthorized')) {
+            // Clear expired token and redirect to login
+            localStorage.removeItem('preklo_access_token');
+            localStorage.removeItem('preklo_refresh_token');
+            localStorage.removeItem('preklo_username');
+            localStorage.removeItem('preklo_email');
+            localStorage.removeItem('preklo_wallet_address');
+            localStorage.removeItem('preklo_user_id');
+            
+            // Redirect to login page
+            window.location.href = '/landing#top';
+            throw new Error('Session expired. Please log in again.');
+          }
+          // If it's not an authentication error, just throw the original error
         }
         
         // Handle different error formats

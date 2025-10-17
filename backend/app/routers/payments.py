@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..database import get_db
 from ..models import User, PaymentRequest, Transaction
@@ -48,7 +48,7 @@ async def create_payment_request(
         payment_id = payment_service.generate_payment_id()
         
         # Calculate expiry timestamp
-        expiry_timestamp = datetime.utcnow() + timedelta(hours=payment_req.expiry_hours)
+        expiry_timestamp = datetime.now(timezone.utc) + timedelta(hours=payment_req.expiry_hours)
         
         # Generate payment link and QR code
         payment_link = payment_service.generate_payment_link(
@@ -129,7 +129,7 @@ async def get_payment_request(payment_id: str, db: Session = Depends(get_db)):
         )
     
     # Check if payment request has expired
-    if payment_request.expiry_timestamp < datetime.utcnow() and payment_request.status == "pending":
+    if payment_request.expiry_timestamp < datetime.now(timezone.utc) and payment_request.status == "pending":
         payment_request.status = "expired"
         db.commit()
     
@@ -162,7 +162,7 @@ async def pay_payment_request(
             detail=f"Payment request is {payment_request.status}"
         )
     
-    if payment_request.expiry_timestamp < datetime.utcnow():
+    if payment_request.expiry_timestamp < datetime.now(timezone.utc):
         payment_request.status = "expired"
         db.commit()
         raise HTTPException(
@@ -288,7 +288,7 @@ async def get_user_payment_requests(
     ).offset(offset).limit(limit).all()
     
     # Update expired payment requests
-    current_time = datetime.utcnow()
+    current_time = datetime.now(timezone.utc)
     for pr in payment_requests:
         if pr.status == "pending" and pr.expiry_timestamp < current_time:
             pr.status = "expired"

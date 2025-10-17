@@ -82,10 +82,6 @@ export const sendMoneyService = {
   // Send money using custodial wallet
   async sendMoneyCustodial(request: SendMoneyRequest): Promise<SendMoneyResponse> {
     try {
-      console.log('Sending money request (custodial):', {
-        ...request,
-        password: '[HIDDEN]' // Don't log password
-      });
 
       const response = await api.post<SendMoneyResponse>(
         `${apiConfig.endpoints.transactions}/send-custodial`,
@@ -106,7 +102,6 @@ export const sendMoneyService = {
   // Send money using non-custodial wallet (Petra)
   async sendMoneyNonCustodial(request: Omit<SendMoneyRequest, 'password'>): Promise<SendMoneyResponse> {
     try {
-      console.log('Sending money request (non-custodial):', request);
 
       // Step 1: Call the Petra transaction preparation endpoint
       const response = await api.post<any>(
@@ -153,26 +148,22 @@ export const sendMoneyService = {
       };
 
       const formattedRecipientAddress = formatAptosAddress(response.data.transaction_details.recipient_address);
-      console.log('Original address:', response.data.transaction_details.recipient_address);
-      console.log('Formatted address:', formattedRecipientAddress);
 
-      // Step 4: Create transaction payload for Petra wallet
+      // Step 4: Create transaction payload for Petra wallet with proper gas configuration
       const transactionPayload = {
         type: "entry_function_payload",
         function: "0x1::coin::transfer",
         type_arguments: [request.currency_type === 'APT' ? "0x1::aptos_coin::AptosCoin" : "0x498d8926f16eb9ca90cab1b3a26aa6f97a080b3fcbe6e83ae150b7243a00fb68::usdc::USDC"],
         arguments: [
           formattedRecipientAddress,
-          Math.floor(parseFloat(request.amount) * Math.pow(10, 8)).toString() // Convert to smallest unit
+          Math.floor(parseFloat(request.amount) * Math.pow(10, request.currency_type === 'APT' ? 8 : 6)).toString() // Convert to smallest unit (APT=8, USDC=6)
         ]
       };
 
-      console.log('Transaction payload for Petra:', transactionPayload);
 
-      // Step 4: Sign and submit transaction with Petra wallet
+      // Step 4: Sign and submit transaction with Petra wallet using new API format
       try {
-        const txResult = await wallet.signAndSubmitTransaction(transactionPayload);
-        console.log('Petra transaction result:', txResult);
+        const txResult = await wallet.signAndSubmitTransaction({ payload: transactionPayload });
 
         // Step 5: Confirm transaction with backend to save to database
         try {
@@ -186,7 +177,6 @@ export const sendMoneyService = {
               description: request.description
             }
           );
-          console.log('Transaction confirmed with backend:', confirmResponse);
         } catch (confirmError) {
           console.error('Failed to confirm transaction with backend:', confirmError);
           // Continue anyway - the transaction was successful on blockchain
@@ -219,6 +209,12 @@ export const sendMoneyService = {
         // Handle specific Petra wallet errors as per documentation
         if (petraError.code === 4001) {
           throw new Error('Transaction cancelled by user');
+        } else if (petraError.message && petraError.message.includes('MAX_GAS_UNITS_BELOW_MIN_TRANSACTION_GAS_UNITS')) {
+          throw new Error('Insufficient gas limit. Please try again or contact support if the issue persists.');
+        } else if (petraError.message && petraError.message.includes('insufficient')) {
+          throw new Error('Insufficient funds to complete the transaction. Please check your balance.');
+        } else if (petraError.message && petraError.message.includes('rejected')) {
+          throw new Error('Transaction was rejected. Please try again.');
         }
         
         throw new Error(`Petra wallet error: ${petraError.message || 'Failed to sign transaction'}`);

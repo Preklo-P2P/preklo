@@ -20,7 +20,7 @@ if [ ! -d "../venv" ]; then
 fi
 
 # Activate virtual environment
-echo "📦 Activating virtual environment..."
+echo "Activating virtual environment..."
 source ../venv/bin/activate
 
 # Debug: Check if Aptos SDK is available

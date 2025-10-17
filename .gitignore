@@ -7,7 +7,7 @@
 *.env
 
 # Project specific
-.bmad-core/
+# .bmad-core/
 .cursor/
 docs/
 

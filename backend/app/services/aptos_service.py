@@ -73,7 +73,7 @@ def _get_aptos_sdk():
 
 class AptosService:
     def __init__(self):
-        self.client = None
+        self._client = None
         self.contract_address = settings.aptos_contract_address
         self.usdc_contract_address = settings.circle_usdc_contract_address
         
@@ -94,18 +94,25 @@ class AptosService:
             SDK_AVAILABLE, SDK_CLASSES = _get_aptos_sdk()
             if SDK_AVAILABLE and SDK_CLASSES['RestClient']:
                 try:
-                    self.client = SDK_CLASSES['RestClient'](settings.aptos_node_url)
+                    self._client = SDK_CLASSES['RestClient'](settings.aptos_node_url)
                     logger.info("Aptos SDK connected to testnet")
                     self._connection_healthy = True
                 except Exception as e:
                     logger.error(f"Failed to initialize Aptos client: {e}")
-                    self.client = None
+                    self._client = None
                     self._connection_healthy = False
             else:
-                self.client = None
+                self._client = None
                 self._connection_healthy = False
                 logger.warning("Aptos SDK not available, using mock service")
             self._client_initialized = True
+    
+    @property
+    def client(self):
+        """Get the Aptos client, initializing it if needed"""
+        if not self._client_initialized:
+            self._ensure_client()
+        return self._client
     
     async def _check_connection_health(self) -> bool:
         """Check if the blockchain connection is healthy"""
@@ -340,29 +347,54 @@ class AptosService:
             # Convert amount to octas (APT's smallest unit)
             amount_octas = int(Decimal(str(amount)) * Decimal(10**8))
             
+            # Validate amount is positive and reasonable
+            if amount_octas <= 0:
+                raise ValueError("Transfer amount must be positive")
+            
+            if amount_octas > 10**15:  # More than 10 million APT
+                raise ValueError("Transfer amount is too large")
+            
             # Estimate gas fee before transaction
             estimated_gas = await self.estimate_gas_fee("transfer")
             logger.info(f"Estimated gas fee for APT transfer: {estimated_gas} APT")
             
-            # Try using create_bcs_signed_transaction and submit_bcs_transaction directly
+            # Use the proper SDK classes for transaction creation
             try:
-                logger.info("Attempting APT transfer using create_bcs_signed_transaction...")
-                # Create a simple transaction payload
-                payload = {
-                    "type": "entry_function_payload",
-                    "function": "0x1::coin::transfer",
-                    "type_arguments": ["0x1::aptos_coin::AptosCoin"],
-                    "arguments": [recipient_address, str(amount_octas)]
-                }
+                logger.info("Attempting APT transfer using proper SDK classes...")
+                EntryFunction = SDK_CLASSES['EntryFunction']
+                TypeTag = SDK_CLASSES['TypeTag']
+                StructTag = SDK_CLASSES['StructTag']
+                TransactionArgument = SDK_CLASSES['TransactionArgument']
+                AccountAddress = SDK_CLASSES['AccountAddress']
+                TransactionPayload = SDK_CLASSES['TransactionPayload']
                 
-                signed_transaction = await self.client.create_bcs_signed_transaction(
-                    sender_account,
-                    payload
+                # Create transaction payload using proper SDK patterns
+                payload = EntryFunction.natural(
+                    "0x1::coin",
+                    "transfer",
+                    [TypeTag(StructTag.from_str("0x1::aptos_coin::AptosCoin"))],
+                    [recipient_address, str(amount_octas)]
                 )
                 
-                txn_hash = await self.client.submit_bcs_transaction(
-                    signed_transaction
-                )
+                # Create signed transaction and submit it
+                try:
+                    signed_transaction = await self.client.create_bcs_signed_transaction(
+                        sender_account,
+                        TransactionPayload(payload)
+                    )
+                    txn_hash = await self.client.submit_bcs_transaction(signed_transaction)
+                except Exception as submit_error:
+                    logger.error(f"Failed to submit APT transaction to blockchain: {submit_error}")
+                    # Check if it's a specific blockchain rejection
+                    error_str = str(submit_error).lower()
+                    if "insufficient" in error_str:
+                        raise ValueError(f"Insufficient balance: {submit_error}")
+                    elif "sequence" in error_str:
+                        raise ValueError(f"Transaction sequence error: {submit_error}")
+                    elif "gas" in error_str:
+                        raise ValueError(f"Gas error: {submit_error}")
+                    else:
+                        raise ValueError(f"Blockchain transaction failed: {submit_error}")
                 logger.info(f"APT transfer transaction submitted: {txn_hash}")
                 
                 # Start monitoring the transaction
@@ -385,10 +417,23 @@ class AptosService:
                 
             except Exception as e:
                 logger.error(f"create_bcs_signed_transaction failed: {e}")
+                # Provide more specific error information
+                error_str = str(e).lower()
+                if "insufficient" in error_str:
+                    logger.error(f"Insufficient balance for APT transfer: {e}")
+                elif "gas" in error_str:
+                    logger.error(f"Gas-related error for APT transfer: {e}")
+                elif "network" in error_str or "connection" in error_str:
+                    logger.error(f"Network error for APT transfer: {e}")
+                elif "400" in error_str or "bad request" in error_str:
+                    logger.error(f"Bad request to Aptos blockchain for APT transfer: {e}")
+                    logger.error(f"Transaction details - Sender: {sender_private_key[:10]}..., Recipient: {recipient_address}, Amount: {amount_octas}")
                 raise e
             
         except Exception as e:
             logger.error(f"Error transferring APT: {e}")
+            # Log more details for debugging
+            logger.error(f"Sender: {sender_private_key[:10]}..., Recipient: {recipient_address}, Amount: {amount}")
             return None
     
     async def transfer_usdc(
@@ -433,19 +478,15 @@ class AptosService:
                 "0x1::coin",
                 "transfer",
                 [TypeTag(StructTag.from_str(self.usdc_contract_address))],
-                [
-                    TransactionArgument(AccountAddress.from_str(recipient_address), "Address"),
-                    TransactionArgument(amount_units, "U64")
-                ]
+                [recipient_address, str(amount_units)]
             )
             
-            # Create and submit transaction
-            transaction = await self.client.create_bcs_transaction(
+            # Create signed transaction and submit it
+            signed_transaction = await self.client.create_bcs_signed_transaction(
                 sender_account,
                 TransactionPayload(payload)
             )
-            
-            txn_hash = await self.client.submit_bcs_transaction(transaction)
+            txn_hash = await self.client.submit_bcs_transaction(signed_transaction)
             logger.info(f"USDC transfer transaction submitted: {txn_hash}")
             
             # Start monitoring the transaction
@@ -468,6 +509,15 @@ class AptosService:
             
         except Exception as e:
             logger.error(f"Error transferring USDC: {e}")
+            # Log more details for debugging
+            logger.error(f"Sender: {sender_private_key[:10]}..., Recipient: {recipient_address}, Amount: {amount}")
+            # Provide more specific error information
+            if "insufficient" in str(e).lower():
+                logger.error(f"Insufficient balance for USDC transfer: {e}")
+            elif "gas" in str(e).lower():
+                logger.error(f"Gas-related error for USDC transfer: {e}")
+            elif "network" in str(e).lower() or "connection" in str(e).lower():
+                logger.error(f"Network error for USDC transfer: {e}")
             return None
     
     async def initialize_username_registry(self) -> Optional[str]:
@@ -492,23 +542,23 @@ class AptosService:
             TransactionPayload = SDK_CLASSES['TransactionPayload']
             EntryFunction = SDK_CLASSES['EntryFunction']
             
-            # Use the same approach as the working transfer function
+            # Use the proper SDK classes for transaction creation
             try:
-                print("Trying create_bcs_signed_transaction method...")
-                # Create a simple transaction payload
-                payload = {
-                    "type": "entry_function_payload",
-                    "function": f"{self.contract_address}::username_registry::initialize",
-                    "type_arguments": [],
-                    "arguments": []
-                }
-                
-                signed_transaction = await self.client.create_bcs_signed_transaction(
-                    admin_account,
-                    payload
+                print("Trying create_bcs_transaction method...")
+                # Create proper transaction payload using SDK classes
+                payload = EntryFunction.natural(
+                    f"{self.contract_address}::username_registry",
+                    "initialize",
+                    [],
+                    []
                 )
                 
-                txn_hash = await self.client.submit_bcs_transaction(signed_transaction)
+                transaction = await self.client.create_bcs_transaction(
+                    admin_account,
+                    TransactionPayload(payload)
+                )
+                
+                txn_hash = await self.client.submit_bcs_transaction(transaction)
                 print("create_bcs_signed_transaction successful")
                 
                 # Wait for transaction to complete
@@ -527,15 +577,12 @@ class AptosService:
                 )
                 
                 # Submit transaction using modern API
-                transaction_payload = TransactionPayload(payload)
-                
-                # Use BCS transaction approach
-                signed_transaction = await self.client.create_bcs_signed_transaction(
+                transaction = await self.client.create_bcs_transaction(
                     admin_account,
-                    transaction_payload
+                    TransactionPayload(payload)
                 )
                 
-                txn_hash = await self.client.submit_bcs_transaction(signed_transaction)
+                txn_hash = await self.client.submit_bcs_transaction(transaction)
                 
                 # Wait for transaction to complete
                 await self.client.wait_for_transaction(txn_hash)
@@ -571,16 +618,15 @@ class AptosService:
                 f"{self.contract_address}::username_registry",
                 "register_username",
                 [],
-                [TransactionArgument(username, "String")]
+                [username]
             )
             
-            # Create and submit transaction
-            transaction = await self.client.create_bcs_transaction(
+            # Create signed transaction and submit it
+            signed_transaction = await self.client.create_bcs_signed_transaction(
                 user_account,
                 TransactionPayload(payload)
             )
-            
-            txn_hash = await self.client.submit_bcs_transaction(transaction)
+            txn_hash = await self.client.submit_bcs_transaction(signed_transaction)
             
             await self.client.wait_for_transaction(txn_hash)
             
@@ -644,21 +690,20 @@ class AptosService:
                 "create_payment_request",
                 [],
                 [
-                    TransactionArgument(payment_id, "String"),
-                    TransactionArgument(amount_units, "U64"),
-                    TransactionArgument(currency_type, "String"),
-                    TransactionArgument(description, "String"),
-                    TransactionArgument(expiry_hours, "U64")
+                    payment_id,
+                    str(amount_units),
+                    currency_type,
+                    description,
+                    str(expiry_hours)
                 ]
             )
             
-            # Create and submit transaction
-            transaction = await self.client.create_bcs_transaction(
+            # Create signed transaction and submit it
+            signed_transaction = await self.client.create_bcs_signed_transaction(
                 recipient_account,
                 TransactionPayload(payload)
             )
-            
-            txn_hash = await self.client.submit_bcs_transaction(transaction)
+            txn_hash = await self.client.submit_bcs_transaction(signed_transaction)
             
             await self.client.wait_for_transaction(txn_hash)
             

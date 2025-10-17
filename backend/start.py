@@ -35,7 +35,7 @@ def main():
     # Load .env file if it exists
     env_file = Path("../.env")
     if env_file.exists():
-        print("📋 Loading environment variables from .env...")
+        print("Loading environment variables from .env...")
         with open(env_file) as f:
             for line in f:
                 line = line.strip()

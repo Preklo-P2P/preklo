@@ -503,12 +503,8 @@ async def send_custodial_transaction(
             detail="No encrypted private key found for custodial account"
         )
     
-    # Verify password
-    if not auth_service.verify_password(transaction_request.password, current_user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid password"
-        )
+    # For custodial wallets, we verify the password by trying to decrypt the private key
+    # No need to check against hashed_password since the private key was encrypted with the same password
     
     try:
         # Resolve recipient username to wallet address
@@ -537,22 +533,42 @@ async def send_custodial_transaction(
         
         fee_amount, net_amount = fee_service.calculate_fee(amount, transaction_type)
         
+        # Check sender balance from blockchain
+        sender_balance = await aptos_service.get_account_balance(current_user.wallet_address, transaction_request.currency_type)
+        if sender_balance < amount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient balance. You have {sender_balance} {transaction_request.currency_type}"
+            )
+        
+        # For APT transactions, also check if user has enough APT for gas fees
+        if transaction_request.currency_type.upper() == "APT":
+            # Estimate gas fee (usually around 0.001-0.01 APT)
+            estimated_gas_fee = Decimal("0.01")  # Conservative estimate
+            if sender_balance < amount + estimated_gas_fee:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Insufficient APT balance for transaction and gas fees. You need at least {amount + estimated_gas_fee} APT (amount: {amount}, estimated gas: {estimated_gas_fee})"
+                )
+        
         # Check if user has enough balance for amount + fee
         if fee_amount > 0:
             total_required = amount + fee_amount
-            # Note: In a real implementation, you'd check the user's actual balance
             print(f"Transaction requires {total_required} {transaction_request.currency_type.upper()} (amount: {amount}, fee: {fee_amount})")
         
         # Get account for signing transaction
         account = wallet_service.get_account_for_transaction(
             current_user.encrypted_private_key,
-            transaction_request.password
+            transaction_request.password,
+            str(current_user.id)
         )
         
         if not account:
+            # The account creation failed, which means password decryption failed
+            # This is the only password verification we need for custodial wallets
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to decrypt wallet for transaction signing"
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid password. Please check your password and try again."
             )
         
         # Sign and submit transaction based on currency type
@@ -577,9 +593,16 @@ async def send_custodial_transaction(
             )
         
         if not tx_hash:
+            # Get more specific error information
+            error_msg = "Transaction failed to submit to blockchain"
+            if transaction_request.currency_type.upper() == "APT":
+                error_msg += ". This could be due to insufficient APT balance for gas fees or network issues."
+            elif transaction_request.currency_type.upper() == "USDC":
+                error_msg += ". This could be due to insufficient USDC balance or network issues."
+            
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Transaction failed to submit to blockchain"
+                detail=error_msg
             )
         
         # Save transaction to database
@@ -692,6 +715,16 @@ async def send_petra_transaction(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Insufficient balance. You have {sender_balance} {transaction_request.currency_type}"
             )
+        
+        # For APT transactions, also check if user has enough APT for gas fees
+        if transaction_request.currency_type.upper() == "APT":
+            # Estimate gas fee (usually around 0.001-0.01 APT)
+            estimated_gas_fee = Decimal("0.01")  # Conservative estimate
+            if sender_balance < amount + estimated_gas_fee:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Insufficient APT balance for transaction and gas fees. You need at least {amount + estimated_gas_fee} APT (amount: {amount}, estimated gas: {estimated_gas_fee})"
+                )
         
         # Calculate fees
         transaction_type = "transfer"
