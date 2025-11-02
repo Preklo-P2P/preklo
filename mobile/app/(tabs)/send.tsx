@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import api from '../../services/api';
+import authService from '../../services/authService';
 
 type Step = 'recipient' | 'amount' | 'description' | 'confirm' | 'success';
 
@@ -21,26 +23,108 @@ export default function SendScreen() {
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState<'USDC' | 'APT'>('USDC');
   const [description, setDescription] = useState('');
+  const [password, setPassword] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [isUserValid, setIsUserValid] = useState<boolean | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [txHash, setTxHash] = useState('');
+  const [userId, setUserId] = useState('');
+  const [userBalance, setUserBalance] = useState({ USDC: 0, APT: 0 });
+  const [isLoadingBalance, setIsLoadingBalance] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const userBalance = { USDC: 1234.56, APT: 45.32 };
+  // Load user data and balance
+  useEffect(() => {
+    initializeData();
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
+      }
+    };
+  }, []);
 
-  // Mock username validation
-  const validateUsername = (username: string) => {
+  const initializeData = async () => {
+    try {
+      const userData = await authService.getUserData();
+      if (userData?.id) {
+        setUserId(userData.id);
+        await fetchBalance(userData.id);
+      }
+    } catch (error) {
+      console.error('Failed to initialize send screen:', error);
+      setError('Failed to load user data');
+    }
+  };
+
+  const fetchBalance = async (userIdParam: string) => {
+    try {
+      setIsLoadingBalance(true);
+      const response = await api.get(`/users/${userIdParam}/balances`);
+      
+      if (response.data && Array.isArray(response.data)) {
+        const balances: { [key: string]: number } = { USDC: 0, APT: 0 };
+        response.data.forEach((balance: any) => {
+          if (balance.currency_type === 'USDC') {
+            balances.USDC = parseFloat(balance.balance || '0');
+          } else if (balance.currency_type === 'APT') {
+            balances.APT = parseFloat(balance.balance || '0');
+          }
+        });
+        setUserBalance(balances);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch balance:', error);
+      setError('Failed to load balance');
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  };
+
+  // Real username validation using API
+  const validateUsername = async (username: string) => {
+    if (!username || username.length < 3) {
+      setIsUserValid(null);
+      return;
+    }
+
     setIsValidating(true);
-    setTimeout(() => {
-      setIsUserValid(username.length > 3);
+    setError(null);
+    try {
+      const response = await api.get(`/username/resolve/${username}`);
+      if (response.data && response.data.username) {
+        setIsUserValid(true);
+      } else {
+        setIsUserValid(false);
+      }
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        setIsUserValid(false);
+      } else {
+        console.error('Username validation error:', error);
+        setError('Failed to validate username');
+        setIsUserValid(false);
+      }
+    } finally {
       setIsValidating(false);
-    }, 500);
+    }
   };
 
   const handleRecipientChange = (text: string) => {
     setRecipient(text);
-    if (text.length > 3) {
-      validateUsername(text);
+    
+    // Clear existing timeout
+    if (validationTimeoutRef.current) {
+      clearTimeout(validationTimeoutRef.current);
+    }
+    
+    if (text.length >= 3) {
+      // Debounce validation
+      validationTimeoutRef.current = setTimeout(() => {
+        validateUsername(text);
+      }, 500);
     } else {
       setIsUserValid(null);
     }
@@ -48,16 +132,31 @@ export default function SendScreen() {
 
   const quickAmounts = [10, 25, 50, 100];
 
+  // Helper function to normalize and parse amount (handles both comma and period as decimal separators)
+  const parseAmount = (value: string): number => {
+    if (!value || value.trim() === '') return 0;
+    // Replace comma with period for parsing (handles European locale)
+    const normalized = value.replace(',', '.');
+    const parsed = parseFloat(normalized);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  // Helper function to get parsed amount
+  const getAmountValue = (): number => {
+    return parseAmount(amount);
+  };
+
   const canProceed = () => {
     switch (currentStep) {
       case 'recipient':
-        return recipient && isUserValid;
+        return recipient && isUserValid === true;
       case 'amount':
-        return amount && parseFloat(amount) > 0 && parseFloat(amount) <= userBalance[currency];
+        const amountNum = getAmountValue();
+        return amount.trim() !== '' && amountNum > 0 && amountNum <= userBalance[currency];
       case 'description':
         return true;
       case 'confirm':
-        return true;
+        return password.length > 0;
       default:
         return false;
     }
@@ -71,21 +170,82 @@ export default function SendScreen() {
   };
 
   const handleBack = () => {
-    if (currentStep === 'amount') setCurrentStep('recipient');
-    else if (currentStep === 'description') setCurrentStep('amount');
-    else if (currentStep === 'confirm') setCurrentStep('description');
-    else if (currentStep === 'success') router.back();
-    else router.back();
+    if (currentStep === 'amount') {
+      setCurrentStep('recipient');
+    } else if (currentStep === 'description') {
+      setCurrentStep('amount');
+    } else if (currentStep === 'confirm') {
+      setCurrentStep('description');
+      setPassword('');
+    } else if (currentStep === 'success') {
+      router.back();
+    } else {
+      router.back();
+    }
   };
 
-  const handleSendMoney = () => {
+  const handleSendMoney = async () => {
+    if (!password) {
+      Alert.alert('Password Required', 'Please enter your password to confirm the transaction');
+      return;
+    }
+
     setIsSending(true);
-    // Mock API call
-    setTimeout(() => {
-      setTxHash('0x' + Math.random().toString(16).substr(2, 40));
+    setError(null);
+    
+    try {
+      const amountValue = getAmountValue();
+      if (amountValue <= 0) {
+        Alert.alert('Invalid Amount', 'Amount must be greater than 0');
+        setIsSending(false);
+        return;
+      }
+
+      const response = await api.post('/transactions/send-custodial', {
+        recipient_username: recipient,
+        amount: amountValue.toString(),
+        currency_type: currency,
+        password: password,
+        description: description || undefined,
+      });
+
+      if (response.data?.success !== false) {
+        // Extract transaction hash from response
+        const transactionHash = response.data?.data?.transaction_hash || 
+                               response.data?.transaction_hash ||
+                               response.data?.transaction_id || 
+                               'Pending';
+        
+        setTxHash(transactionHash);
+        setPassword('');
+        setCurrentStep('success');
+        
+        // Refresh balance after successful send
+        if (userId) {
+          await fetchBalance(userId);
+        }
+      } else {
+        throw new Error(response.data?.message || 'Transaction failed');
+      }
+    } catch (error: any) {
+      console.error('Send money error:', error);
+      
+      let errorMessage = error.response?.data?.detail || 
+                        error.response?.data?.message || 
+                        error.response?.data?.error?.details?.original_detail ||
+                        error.message || 
+                        'Failed to send money. Please try again.';
+      
+      // Handle specific custodial wallet error
+      if (errorMessage.includes('custodial wallet') || errorMessage.includes('custodial')) {
+        errorMessage = 'Your account is not set up for custodial transactions. Please contact support or re-register your account.';
+      }
+      
+      Alert.alert('Transaction Failed', errorMessage);
+      setError(errorMessage);
+    } finally {
       setIsSending(false);
-      setCurrentStep('success');
-    }, 2000);
+    }
   };
 
   const getStepNumber = () => {
@@ -159,21 +319,11 @@ export default function SendScreen() {
               )}
             </View>
 
-            <View style={styles.suggestionsContainer}>
-              <Text style={styles.suggestionsLabel}>Recent:</Text>
-              {['john_doe', 'maria_garcia', 'alex_smith'].map((name) => (
-                <TouchableOpacity
-                  key={name}
-                  style={styles.suggestionButton}
-                  onPress={() => {
-                    setRecipient(name);
-                    setIsUserValid(true);
-                  }}
-                >
-                  <Text style={styles.suggestionText}>@{name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {error && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -184,15 +334,59 @@ export default function SendScreen() {
             
             <View style={styles.amountContainer}>
               <View style={styles.amountInputRow}>
-                <Text style={styles.currencySymbol}>$</Text>
+                {currency === 'USDC' && <Text style={styles.currencySymbol}>$</Text>}
                 <TextInput
                   style={styles.amountInput}
                   placeholder="0.00"
                   value={amount}
-                  onChangeText={setAmount}
+                  onChangeText={(text) => {
+                    // Remove any non-numeric characters except one decimal point or comma
+                    let cleaned = text.replace(/[^0-9.,]/g, '');
+                    
+                    // If both comma and period exist, keep only the first one found
+                    const hasComma = cleaned.includes(',');
+                    const hasPeriod = cleaned.includes('.');
+                    
+                    if (hasComma && hasPeriod) {
+                      // If both exist, use the first one and remove the other
+                      const commaIndex = cleaned.indexOf(',');
+                      const periodIndex = cleaned.indexOf('.');
+                      
+                      if (commaIndex < periodIndex) {
+                        // Comma comes first, remove period
+                        cleaned = cleaned.replace(/\./g, '');
+                      } else {
+                        // Period comes first, remove comma
+                        cleaned = cleaned.replace(/,/g, '');
+                      }
+                    }
+                    
+                    // If multiple of the same separator, keep only the first one
+                    const separator = cleaned.includes(',') ? ',' : '.';
+                    const parts = cleaned.split(separator);
+                    if (parts.length > 2) {
+                      cleaned = parts[0] + separator + parts.slice(1).join('');
+                    }
+                    
+                    setAmount(cleaned);
+                  }}
                   keyboardType="decimal-pad"
                 />
               </View>
+              {amount.trim() !== '' && (
+                <View style={{ marginTop: 8 }}>
+                  {(() => {
+                    const amountNum = getAmountValue();
+                    if (amountNum <= 0) {
+                      return <Text style={styles.errorText}>Amount must be greater than 0</Text>;
+                    } else if (amountNum > userBalance[currency]) {
+                      return <Text style={styles.errorText}>Insufficient balance</Text>;
+                    } else {
+                      return null;
+                    }
+                  })()}
+                </View>
+              )}
               
               <View style={styles.currencyToggle}>
                 <TouchableOpacity
@@ -213,9 +407,13 @@ export default function SendScreen() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.balanceText}>
-                Balance: ${userBalance[currency].toFixed(2)} {currency}
-              </Text>
+              {isLoadingBalance ? (
+                <ActivityIndicator size="small" color="#10b981" style={{ marginTop: 8 }} />
+              ) : (
+                <Text style={styles.balanceText}>
+                  Balance: {currency === 'USDC' ? '$' : ''}{userBalance[currency].toFixed(2)} {currency}
+                </Text>
+              )}
             </View>
 
             <View style={styles.quickAmountsContainer}>
@@ -239,7 +437,7 @@ export default function SendScreen() {
         {currentStep === 'description' && (
           <View style={styles.stepContainer}>
             <Text style={styles.stepDescription}>
-              Sending ${amount} {currency} to @{recipient}
+              Sending {currency === 'USDC' ? '$' : ''}{getAmountValue().toFixed(2)} {currency} to @{recipient}
             </Text>
             
             <View style={styles.inputContainer}>
@@ -281,7 +479,9 @@ export default function SendScreen() {
               </View>
               
               <Text style={styles.confirmRecipient}>@{recipient}</Text>
-              <Text style={styles.confirmAmount}>${parseFloat(amount).toFixed(2)}</Text>
+              <Text style={styles.confirmAmount}>
+                {currency === 'USDC' ? '$' : ''}{getAmountValue().toFixed(2)}
+              </Text>
               <Text style={styles.confirmCurrency}>{currency}</Text>
 
               {description && (
@@ -294,19 +494,42 @@ export default function SendScreen() {
               <View style={styles.confirmBreakdown}>
                 <View style={styles.confirmRow}>
                   <Text style={styles.confirmLabel}>Amount</Text>
-                  <Text style={styles.confirmValue}>${amount}</Text>
+                  <Text style={styles.confirmValue}>
+                    {currency === 'USDC' ? '$' : ''}{getAmountValue().toFixed(2)}
+                  </Text>
                 </View>
                 <View style={styles.confirmRow}>
                   <Text style={styles.confirmLabel}>Network fee</Text>
-                  <Text style={styles.confirmValue}>$0.01</Text>
+                  <Text style={styles.confirmValue}>
+                    {currency === 'USDC' ? '$' : ''}~0.01
+                  </Text>
                 </View>
                 <View style={[styles.confirmRow, styles.confirmTotal]}>
                   <Text style={styles.confirmTotalLabel}>Total</Text>
                   <Text style={styles.confirmTotalValue}>
-                    ${(parseFloat(amount) + 0.01).toFixed(2)}
+                    {currency === 'USDC' ? '$' : ''}{(getAmountValue() + 0.01).toFixed(2)}
                   </Text>
                 </View>
               </View>
+
+              <View style={styles.passwordContainer}>
+                <Text style={styles.inputLabel}>Enter your password to confirm</Text>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {error && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -320,7 +543,7 @@ export default function SendScreen() {
             
             <Text style={styles.successTitle}>Payment Sent!</Text>
             <Text style={styles.successSubtitle}>
-              ${amount} {currency} sent to @{recipient}
+              {currency === 'USDC' ? '$' : ''}{getAmountValue().toFixed(2)} {currency} sent to @{recipient}
             </Text>
 
             <View style={styles.successCard}>
@@ -756,5 +979,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  passwordContainer: {
+    width: '100%',
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  passwordInput: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#374151',
+    marginTop: 8,
+  },
+  errorContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#fef2f2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
   },
 });

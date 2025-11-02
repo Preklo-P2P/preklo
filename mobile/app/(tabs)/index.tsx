@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,59 +7,233 @@ import {
   RefreshControl,
   StyleSheet,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import api from '../../services/api';
+import authService from '../../services/authService';
 
-// Mock data - replace with real API calls
-const MOCK_USER = {
-  username: '@your_username',
-  usdcBalance: 1234.56,
-  aptBalance: 45.32,
-};
-
-const MOCK_TRANSACTIONS = [
-  {
-    id: '1',
-    type: 'sent',
-    username: '@john_doe',
-    amount: 25.00,
-    currency: 'USDC',
-    status: 'confirmed',
-    timestamp: '2h ago',
-    description: 'Lunch money',
-  },
-  {
-    id: '2',
-    type: 'received',
-    username: '@maria_garcia',
-    amount: 100.00,
-    currency: 'USDC',
-    status: 'confirmed',
-    timestamp: '5h ago',
-  },
-  {
-    id: '3',
-    type: 'sent',
-    username: '@alex_smith',
-    amount: 50.00,
-    currency: 'USDC',
-    status: 'pending',
-    timestamp: '1d ago',
-    description: 'Rent split',
-  },
-];
+interface Transaction {
+  id: string;
+  type: 'sent' | 'received';
+  username: string;
+  amount: number;
+  currency: string;
+  status: string;
+  timestamp: string;
+  description?: string;
+}
 
 export default function DashboardScreen() {
+  // User state
+  const [username, setUsername] = useState('');
+  const [userId, setUserId] = useState('');
+  
+  // Balance state
+  const [usdcBalance, setUsdcBalance] = useState(0);
+  const [aptBalance, setAptBalance] = useState(0);
+  
+  // Transactions state
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  
+  // Loading states
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(true);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Error state
+  const [error, setError] = useState<string | null>(null);
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+  // Load user data from AsyncStorage
+  const loadUserData = async () => {
+    try {
+      const userData = await authService.getUserData();
+      if (userData) {
+        console.log('📱 Loaded user data:', userData);
+        setUsername(userData.username);
+        setUserId(userData.id);
+        return userData;
+      } else {
+        console.log('❌ No user data found in AsyncStorage');
+        setError('Please login again');
+      }
+    } catch (error) {
+      console.error('❌ Error loading user data:', error);
+      setError('Failed to load user data');
+    } finally {
+      setIsLoadingUser(false);
+    }
+    return null;
+  };
+
+  // Fetch user balance from backend
+  const fetchBalance = async (userId: string) => {
+    try {
+      console.log('💰 Fetching balance for user:', userId);
+      
+      const response = await api.get(`/users/${userId}/balances`);
+      console.log('✅ Balance response:', response.data);
+      
+      if (response.data && Array.isArray(response.data)) {
+        // Find USDC balance
+        const usdcBalanceData = response.data.find((b: any) => b.currency_type === 'USDC');
+        if (usdcBalanceData) {
+          setUsdcBalance(parseFloat(usdcBalanceData.balance || usdcBalanceData.available_balance || 0));
+        }
+        
+        // Find APT balance
+        const aptBalanceData = response.data.find((b: any) => b.currency_type === 'APT');
+        if (aptBalanceData) {
+          setAptBalance(parseFloat(aptBalanceData.balance || aptBalanceData.available_balance || 0));
+        }
+        
+        console.log('💵 USDC Balance:', usdcBalanceData?.balance || 0);
+        console.log('💵 APT Balance:', aptBalanceData?.balance || 0);
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching balance:', error);
+      console.error('❌ Error details:', error.response?.data);
+      setError('Failed to load balance');
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  };
+
+  // Format timestamp to relative time (e.g., "2h ago")
+  const formatTimestamp = (timestamp: string | Date) => {
+    if (!timestamp) return 'Unknown';
+    
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  // Fetch transaction history from backend
+  const fetchTransactions = async (userId: string) => {
+    try {
+      console.log('📜 Fetching transactions for user:', userId);
+      
+      // Use the enhanced history endpoint which uses current authenticated user
+      const response = await api.get(`/transactions/history?limit=5`);
+      
+      console.log('✅ Transactions response:', response.data);
+      
+      // Enhanced history endpoint returns { transactions: [], pagination: {} }
+      const transactionsArray = response.data?.transactions || (Array.isArray(response.data) ? response.data : []);
+      
+      if (transactionsArray && Array.isArray(transactionsArray)) {
+        // Transform backend data to match our UI format
+        const formattedTransactions: Transaction[] = transactionsArray.map((tx: any) => {
+          const isSent = tx.sender_id === userId;
+          const otherUser = isSent ? tx.recipient : tx.sender;
+          
+          return {
+            id: tx.id || tx.transaction_hash,
+            type: isSent ? 'sent' : 'received',
+            username: otherUser?.username ? `@${otherUser.username}` : 'Unknown',
+            amount: parseFloat(tx.amount || 0),
+            currency: tx.currency_type || 'USDC',
+            status: tx.status || 'confirmed',
+            timestamp: formatTimestamp(tx.created_at),
+            description: tx.description
+          };
+        });
+        
+        setTransactions(formattedTransactions);
+        console.log('📊 Formatted transactions:', formattedTransactions.length);
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching transactions:', error);
+      console.error('❌ Error details:', error.response?.data);
+      // Don't show error for transactions - just leave empty
+    } finally {
+      setIsLoadingTransactions(false);
+    }
+  };
+
+  // Load all data when component mounts
+  useEffect(() => {
+    initializeData();
   }, []);
+
+  const initializeData = async () => {
+    console.log('🚀 Initializing Dashboard data...');
+    
+    // First load user data from AsyncStorage
+    const userData = await loadUserData();
+    
+    if (userData && userData.id) {
+      // Then fetch balance and transactions from backend
+      await Promise.all([
+        fetchBalance(userData.id),
+        fetchTransactions(userData.id)
+      ]);
+    }
+    
+    console.log('✅ Dashboard initialization complete');
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    console.log('🔄 Refreshing dashboard data...');
+    
+    try {
+      const userData = await authService.getUserData();
+      if (userData && userData.id) {
+        await Promise.all([
+          fetchBalance(userData.id),
+          fetchTransactions(userData.id)
+        ]);
+      }
+    } catch (error) {
+      console.error('❌ Error refreshing:', error);
+    }
+    
+    setRefreshing(false);
+    console.log('✅ Refresh complete');
+  }, []);
+
+  // Show loading state
+  if (isLoadingUser || isLoadingBalance) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={{ marginTop: 16, color: '#6b7280' }}>Loading dashboard...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
+  // Show error state
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
+          <Ionicons name="alert-circle" size={64} color="#ef4444" />
+          <Text style={{ marginTop: 16, fontSize: 18, fontWeight: '600', color: '#374151' }}>
+            {error}
+          </Text>
+          <TouchableOpacity 
+            style={{ marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#10b981', borderRadius: 8 }}
+            onPress={initializeData}
+          >
+            <Text style={{ color: '#ffffff', fontWeight: '600' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -71,7 +245,7 @@ export default function DashboardScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.username}>{MOCK_USER.username}</Text>
+          <Text style={styles.username}>@{username}</Text>
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.iconButton}>
               <Ionicons name="search" size={24} color="#374151" />
@@ -89,11 +263,11 @@ export default function DashboardScreen() {
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Your Balance</Text>
           <View style={styles.balanceRow}>
-            <Text style={styles.balanceAmount}>${MOCK_USER.usdcBalance.toFixed(2)}</Text>
+            <Text style={styles.balanceAmount}>${usdcBalance.toFixed(2)}</Text>
             <Text style={styles.balanceCurrency}>USDC</Text>
           </View>
           <Text style={styles.secondaryBalance}>
-            {MOCK_USER.aptBalance.toFixed(2)} APT
+            {aptBalance.toFixed(2)} APT
           </Text>
           <Text style={styles.refreshHint}>Pull to refresh</Text>
         </View>
@@ -123,7 +297,19 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
 
-          {MOCK_TRANSACTIONS.map((tx) => (
+          {isLoadingTransactions ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#10b981" />
+              <Text style={{ marginTop: 8, color: '#6b7280' }}>Loading transactions...</Text>
+            </View>
+          ) : transactions.length === 0 ? (
+            <View style={{ padding: 40, alignItems: 'center' }}>
+              <Ionicons name="receipt-outline" size={48} color="#d1d5db" />
+              <Text style={{ marginTop: 16, fontSize: 16, color: '#6b7280' }}>No transactions yet</Text>
+              <Text style={{ marginTop: 4, fontSize: 14, color: '#9ca3af' }}>Your transactions will appear here</Text>
+            </View>
+          ) : (
+            transactions.map((tx) => (
             <TouchableOpacity key={tx.id} style={styles.transactionCard}>
               <View style={styles.transactionIcon}>
                 <Ionicons
@@ -155,7 +341,8 @@ export default function DashboardScreen() {
                 <Text style={styles.currency}>{tx.currency}</Text>
               </View>
             </TouchableOpacity>
-          ))}
+            ))
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

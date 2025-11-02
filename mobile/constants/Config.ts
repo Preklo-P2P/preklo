@@ -1,8 +1,11 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 const ENV = {
   dev: {
-    apiUrl: 'http://localhost:8000/api/v1',
+    // Use your computer's IP address for physical devices
+    // For iOS/Android simulator, you can use localhost
+    apiUrl: 'http://192.168.8.4:8000/api/v1',
     appName: 'Preklo (Dev)',
   },
   staging: {
@@ -10,7 +13,7 @@ const ENV = {
     appName: 'Preklo (Staging)',
   },
   prod: {
-    apiUrl: 'https://api.preklo.app/api/v1',
+    apiUrl: 'https://resilient-enthusiasm-production-47f1.up.railway.app/api/v1',
     appName: 'Preklo',
   },
 };

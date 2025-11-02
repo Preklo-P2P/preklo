@@ -397,6 +397,12 @@ async def login_user_wallet(request: WalletLoginRequest, db: Session = Depends(g
         db.commit()
         print(f"Updated user {user.username} to non-custodial (no encrypted private key)")
     
+    # Auto-fix: If user has encrypted private key but is marked as non-custodial, fix it
+    if user.encrypted_private_key and not user.is_custodial:
+        user.is_custodial = True
+        db.commit()
+        print(f"Auto-fixed user {user.username}: set is_custodial=True (has encrypted private key)")
+    
     # Create tokens
     tokens = auth_service.create_user_tokens(user)
     
