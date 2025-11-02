@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,14 @@ import {
   SafeAreaView,
   Modal,
   Share,
+  RefreshControl,
+  ActivityIndicator,
+  Clipboard,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import api from '../../services/api';
+import authService from '../../services/authService';
 
 interface Transaction {
   id: string;
@@ -23,76 +29,143 @@ interface Transaction {
   description?: string;
   date: string;
   txHash?: string;
+  created_at?: string;
 }
-
-const MOCK_TRANSACTIONS: Transaction[] = [
-  {
-    id: '1',
-    type: 'sent',
-    username: '@john_doe',
-    amount: 25.00,
-    currency: 'USDC',
-    status: 'confirmed',
-    timestamp: '2h ago',
-    description: 'Lunch money',
-    date: 'Today',
-    txHash: '0x7a8f...9b2c',
-  },
-  {
-    id: '2',
-    type: 'received',
-    username: '@maria_garcia',
-    amount: 100.00,
-    currency: 'USDC',
-    status: 'confirmed',
-    timestamp: '5h ago',
-    date: 'Today',
-    txHash: '0x2c9d...4e1a',
-  },
-  {
-    id: '3',
-    type: 'sent',
-    username: '@alex_smith',
-    amount: 50.00,
-    currency: 'USDC',
-    status: 'pending',
-    timestamp: '1d ago',
-    description: 'Rent split',
-    date: 'Yesterday',
-    txHash: '0x3b4e...7f2d',
-  },
-  {
-    id: '4',
-    type: 'received',
-    username: '@sarah_wilson',
-    amount: 75.50,
-    currency: 'USDC',
-    status: 'confirmed',
-    timestamp: '1d ago',
-    date: 'Yesterday',
-    txHash: '0x5d7a...1c8b',
-  },
-  {
-    id: '5',
-    type: 'sent',
-    username: '@mike_johnson',
-    amount: 30.00,
-    currency: 'APT',
-    status: 'confirmed',
-    timestamp: '2d ago',
-    description: 'Coffee',
-    date: 'Dec 17, 2024',
-    txHash: '0x9e2f...6a3d',
-  },
-];
 
 export default function HistoryScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'sent' | 'received'>('all');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredTransactions = MOCK_TRANSACTIONS.filter((tx) => {
+  const loadTransactions = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const direction = filter === 'all' ? undefined : filter;
+      const params: any = {
+        limit: 100, // Load more for history screen
+        offset: 0,
+      };
+      
+      if (direction) {
+        params.direction = direction;
+      }
+
+      console.log('📜 Fetching transaction history:', params);
+      const response = await api.get('/transactions/history', { params });
+      
+      console.log('✅ Transactions response:', response.data);
+
+      if (response.data && response.data.transactions) {
+        const transactionsArray = response.data.transactions;
+        
+        // Transform API response to UI format
+        const formattedTransactions: Transaction[] = transactionsArray.map((tx: any) => {
+          const currentUserId = tx.sender?.id || tx.user_id;
+          const isSent = tx.direction === 'sent' || (tx.sender && tx.sender.id === currentUserId);
+          const otherUser = isSent ? tx.recipient : tx.sender;
+          
+          // Format date
+          const date = formatDate(tx.created_at);
+          const timestamp = formatTimestamp(tx.created_at);
+          
+          return {
+            id: tx.id || tx.transaction_hash,
+            type: isSent ? 'sent' : 'received',
+            username: otherUser?.username ? `@${otherUser.username}` : (tx.recipient_address || tx.sender_address || 'Unknown'),
+            amount: parseFloat(tx.amount || 0),
+            currency: tx.currency_type || 'USDC',
+            status: tx.status || 'confirmed',
+            timestamp: timestamp,
+            description: tx.description,
+            date: date,
+            txHash: tx.transaction_hash || tx.id,
+            created_at: tx.created_at,
+          };
+        });
+        
+        setTransactions(formattedTransactions);
+        console.log('📊 Formatted transactions:', formattedTransactions.length);
+      } else {
+        setTransactions([]);
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching transactions:', error);
+      console.error('❌ Error details:', error.response?.data);
+      setError('Failed to load transactions');
+      // Set empty array on error so UI shows empty state
+      setTransactions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadTransactions();
+    setRefreshing(false);
+  }, [loadTransactions]);
+
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return 'Unknown';
+    
+    try {
+      const date = new Date(dateString);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      // Reset time to compare dates only
+      const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const yesterdayOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+      
+      if (dateOnly.getTime() === todayOnly.getTime()) {
+        return 'Today';
+      } else if (dateOnly.getTime() === yesterdayOnly.getTime()) {
+        return 'Yesterday';
+      } else {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch (e) {
+      return 'Unknown';
+    }
+  };
+
+  const formatTimestamp = (dateString?: string): string => {
+    if (!dateString) return 'Unknown';
+    
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+      
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays === 1) return '1d ago';
+      if (diffDays < 7) return `${diffDays}d ago`;
+      
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch (e) {
+      return 'Unknown';
+    }
+  };
+
+  const filteredTransactions = transactions.filter((tx) => {
     const matchesSearch = tx.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          tx.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesFilter = filter === 'all' || tx.type === filter;
@@ -213,11 +286,31 @@ export default function HistoryScreen() {
       )}
 
       {/* Transaction List */}
-      <ScrollView style={styles.content}>
-        {Object.entries(groupedTransactions).map(([date, transactions]) => (
-          <View key={date} style={styles.dateGroup}>
-            <Text style={styles.dateHeader}>{date}</Text>
-            {transactions.map((tx) => (
+      {isLoading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={styles.loadingText}>Loading transactions...</Text>
+        </View>
+      ) : error && transactions.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="alert-circle-outline" size={64} color="#ef4444" />
+          <Text style={styles.emptyText}>Failed to load transactions</Text>
+          <Text style={styles.emptySubtext}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={loadTransactions}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {Object.entries(groupedTransactions).map(([date, transactions]) => (
+            <View key={date} style={styles.dateGroup}>
+              <Text style={styles.dateHeader}>{date}</Text>
+              {transactions.map((tx) => (
               <TouchableOpacity
                 key={tx.id}
                 style={styles.transactionCard}
@@ -256,16 +349,17 @@ export default function HistoryScreen() {
           </View>
         ))}
 
-        {filteredTransactions.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="receipt-outline" size={64} color="#d1d5db" />
-            <Text style={styles.emptyText}>No transactions found</Text>
-            <Text style={styles.emptySubtext}>
-              {searchQuery ? 'Try a different search' : 'Your transactions will appear here'}
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+          {filteredTransactions.length === 0 && (
+            <View style={styles.emptyState}>
+              <Ionicons name="receipt-outline" size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No transactions found</Text>
+              <Text style={styles.emptySubtext}>
+                {searchQuery ? 'Try a different search' : 'Your transactions will appear here'}
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
 
       {/* Transaction Detail Modal */}
       <Modal
@@ -310,11 +404,18 @@ export default function HistoryScreen() {
                   <View style={styles.txDetails}>
                     <View style={styles.txDetailRow}>
                       <Text style={styles.txDetailLabel}>Transaction ID</Text>
-                      <TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (selectedTx.txHash) {
+                            Clipboard.setString(selectedTx.txHash);
+                            Alert.alert('Copied', 'Transaction hash copied to clipboard');
+                          }
+                        }}
+                      >
                         <Ionicons name="copy-outline" size={20} color="#6b7280" />
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.txHash}>{selectedTx.txHash}</Text>
+                    <Text style={styles.txHash}>{selectedTx.txHash || selectedTx.id}</Text>
 
                     <View style={styles.txDetailRow}>
                       <Text style={styles.txDetailLabel}>Status</Text>
@@ -344,7 +445,28 @@ export default function HistoryScreen() {
                     <Ionicons name="share-social" size={20} color="#10b981" />
                     <Text style={styles.modalButtonText}>Share</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.modalButton}>
+                  <TouchableOpacity
+                    style={styles.modalButton}
+                    onPress={() => {
+                      if (selectedTx.txHash) {
+                        const explorerUrl = `https://explorer.aptoslabs.com/txn/${selectedTx.txHash}?network=testnet`;
+                        Alert.alert(
+                          'Open Explorer',
+                          'Copy this URL to view on Aptos Explorer:\n' + explorerUrl,
+                          [
+                            {
+                              text: 'Copy URL',
+                              onPress: () => {
+                                Clipboard.setString(explorerUrl);
+                                Alert.alert('Copied', 'Explorer URL copied to clipboard');
+                              },
+                            },
+                            { text: 'OK' },
+                          ]
+                        );
+                      }
+                    }}
+                  >
                     <Ionicons name="open-outline" size={20} color="#10b981" />
                     <Text style={styles.modalButtonText}>View on Explorer</Text>
                   </TouchableOpacity>
@@ -642,5 +764,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#374151',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
   },
 });

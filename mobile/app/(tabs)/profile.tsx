@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,74 @@ import {
   SafeAreaView,
   Alert,
   Switch,
+  ActivityIndicator,
+  Clipboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import authService from '../../services/authService';
+import api from '../../services/api';
 
 export default function ProfileScreen() {
-  const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
-  const [biometricsEnabled, setBiometricsEnabled] = React.useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [biometricsEnabled, setBiometricsEnabled] = useState(false);
+  const [userData, setUserData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const username = '@your_username';
-  const email = 'your.email@example.com';
-  const walletAddress = '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb';
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      // First load from AsyncStorage (fast)
+      const cachedUser = await authService.getUserData();
+      if (cachedUser) {
+        setUserData(cachedUser);
+      }
+      
+      // Then fetch fresh data from backend
+      if (cachedUser?.id) {
+        try {
+          console.log('📱 Fetching fresh user data from backend:', cachedUser.id);
+          const response = await api.get(`/users/${cachedUser.id}`);
+          console.log('✅ User data response:', response.data);
+          
+          if (response.data) {
+            setUserData(response.data);
+            // Update cached user data
+            await authService.saveAuthData(
+              await authService.getAuthToken() || '',
+              response.data
+            );
+          }
+        } catch (error: any) {
+          console.error('❌ Error fetching user data from backend:', error);
+          // If backend fetch fails, keep using cached data
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const username = userData?.username ? `@${userData.username}` : '@loading...';
+  const email = userData?.email || 'loading...';
+  const fullName = userData?.full_name || '';
+  const walletAddress = userData?.wallet_address || '0x...';
+
+  const handleCopyWallet = async () => {
+    try {
+      if (walletAddress && walletAddress !== '0x...') {
+        await Clipboard.setString(walletAddress);
+        Alert.alert('Copied', 'Wallet address copied to clipboard');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to copy wallet address');
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -29,14 +86,25 @@ export default function ProfileScreen() {
         {
           text: 'Log Out',
           style: 'destructive',
-          onPress: () => {
-            // In real app, clear auth tokens and navigate to login
-            Alert.alert('Logged Out', 'You have been logged out successfully');
+          onPress: async () => {
+            await authService.logout();
+            router.replace('/login');
           },
         },
       ]
     );
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const SettingItem = ({
     icon,
@@ -93,15 +161,16 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.username}>{username}</Text>
+            {fullName && <Text style={styles.fullName}>{fullName}</Text>}
             <Text style={styles.email}>{email}</Text>
             <View style={styles.walletInfo}>
               <Ionicons name="wallet" size={14} color="#6b7280" />
               <Text style={styles.walletAddress}>
-                {walletAddress.slice(0, 8)}...{walletAddress.slice(-6)}
+                {walletAddress.length > 14 
+                  ? `${walletAddress.slice(0, 8)}...${walletAddress.slice(-6)}`
+                  : walletAddress}
               </Text>
-              <TouchableOpacity
-                onPress={() => Alert.alert('Copied', 'Wallet address copied to clipboard')}
-              >
+              <TouchableOpacity onPress={handleCopyWallet}>
                 <Ionicons name="copy-outline" size={14} color="#6b7280" />
               </TouchableOpacity>
             </View>
@@ -300,6 +369,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f9fafb',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#6b7280',
+  },
   header: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -349,6 +428,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
     marginBottom: 4,
+  },
+  fullName: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 4,
+    fontStyle: 'italic',
   },
   email: {
     fontSize: 14,

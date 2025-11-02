@@ -132,3 +132,25 @@ tmp/
 # Local development
 .local/
 local/
+
+# Mobile / Expo / React Native
+mobile/.expo/
+mobile/node_modules/
+mobile/dist/
+mobile/web-build/
+mobile/.expo-shared/
+mobile/npm-debug.*
+mobile/yarn-error.*
+mobile/.metro-health-check*
+mobile/*.orig.*
+mobile/*.jks
+mobile/*.p8
+mobile/*.p12
+mobile/*.key
+mobile/*.mobileprovision
+mobile/*.tsbuildinfo
+
+# Marketing Website (keep simple, no node_modules)
+# Only ignore large image files if needed
+frontend-marketing/*.psd
+frontend-marketing/*.sketch
