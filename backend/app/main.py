@@ -5,7 +5,7 @@ import uvicorn
 
 from .config import settings
 from .database import get_db
-from .routers import users, transactions, payments, fiat, username, health, explorer, auth, circle, cards, webhooks, fees, notifications, blockchain, send_money, wallet, receive_money, transaction_history, transaction_limits, payment_requests, vouchers, security
+from .routers import users, transactions, payments, fiat, username, health, explorer, auth, circle, cards, webhooks, fees, notifications, blockchain, send_money, wallet, receive_money, transaction_history, transaction_limits, payment_requests, vouchers, security, sandbox_api_keys, sandbox_test_accounts, sandbox_signup, sandbox_transactions, deposit, waitlist
 from .dependencies import RateLimitMiddleware
 from .utils.error_handlers import setup_error_handlers
 from .utils.logging import setup_logging
@@ -74,6 +74,12 @@ app.include_router(payment_requests.router, prefix=settings.api_v1_str, tags=["P
 app.include_router(vouchers.router, prefix=settings.api_v1_str + "/vouchers", tags=["Vouchers"])
 app.include_router(security.router, prefix=settings.api_v1_str + "/security", tags=["Security"])
 app.include_router(wallet.router, prefix=settings.api_v1_str + "/wallet", tags=["Wallet"])
+app.include_router(deposit.router, prefix=settings.api_v1_str + "/deposit", tags=["Deposit"])
+app.include_router(sandbox_signup.router, tags=["Sandbox"])
+app.include_router(sandbox_api_keys.router, tags=["Sandbox"])
+app.include_router(sandbox_test_accounts.router, tags=["Sandbox"])
+app.include_router(sandbox_transactions.router, tags=["Sandbox"])
+app.include_router(waitlist.router, prefix=settings.api_v1_str + "/waitlist", tags=["Waitlist"])
 
 # Setup error handlers
 setup_error_handlers(app)

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Numeric, Text, ForeignKey, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from .database import GUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -9,7 +9,7 @@ import uuid
 class User(Base):
     __tablename__ = "users"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     username = Column(String(32), unique=True, nullable=False, index=True)
     wallet_address = Column(String(66), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=True, index=True)
@@ -53,8 +53,8 @@ class User(Base):
 class Balance(Base):
     __tablename__ = "balances"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     currency_type = Column(String(10), nullable=False)  # USDC, APT, etc.
     balance = Column(Numeric(20, 8), default=0.0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -72,10 +72,10 @@ class Balance(Base):
 class Transaction(Base):
     __tablename__ = "transactions"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     transaction_hash = Column(String(66), unique=True, nullable=False, index=True)
-    sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    recipient_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    sender_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     sender_address = Column(String(66), nullable=False)
     recipient_address = Column(String(66), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)
@@ -103,9 +103,9 @@ class Transaction(Base):
 class PaymentRequest(Base):
     __tablename__ = "payment_requests"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     payment_id = Column(String(64), nullable=False, unique=True)
-    recipient_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)
     currency_type = Column(String(10), nullable=False)
     description = Column(Text, nullable=True)
@@ -113,7 +113,7 @@ class PaymentRequest(Base):
     payment_link = Column(String(512), nullable=True)
     status = Column(String(20), default="pending")  # pending, paid, expired, cancelled
     expiry_timestamp = Column(DateTime(timezone=True), nullable=False)
-    transaction_id = Column(UUID(as_uuid=True), ForeignKey("transactions.id"), nullable=True)
+    transaction_id = Column(GUID, ForeignKey("transactions.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -125,17 +125,17 @@ class PaymentRequest(Base):
 class Voucher(Base):
     __tablename__ = "vouchers"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     voucher_code = Column(String(20), unique=True, nullable=False, index=True)
-    creator_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    creator_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)
     currency_type = Column(String(10), nullable=False, default="USDC")
     status = Column(String(20), default="active")  # active, redeemed, expired, cancelled
     pin_hash = Column(String(255), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     redeemed_at = Column(DateTime(timezone=True), nullable=True)
-    redeemed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    agent_id = Column(UUID(as_uuid=True), nullable=True)  # Voucher agent who processed redemption
+    redeemed_by = Column(GUID, ForeignKey("users.id"), nullable=True)
+    agent_id = Column(GUID, nullable=True)  # Voucher agent who processed redemption
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -147,8 +147,8 @@ class Voucher(Base):
 class SecurityEvent(Base):
     __tablename__ = "security_events"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     event_type = Column(String(50), nullable=False)  # login, transaction, device_change, etc.
     event_data = Column(JSON, nullable=True)
     risk_score = Column(Integer, default=0)
@@ -165,8 +165,8 @@ class SecurityEvent(Base):
 class TrustedDevice(Base):
     __tablename__ = "trusted_devices"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     device_name = Column(String(255), nullable=False)
     device_fingerprint = Column(String(255), nullable=False, unique=True)
     device_type = Column(String(50), nullable=True)  # mobile, desktop, tablet
@@ -182,8 +182,8 @@ class TrustedDevice(Base):
 class BiometricCredential(Base):
     __tablename__ = "biometric_credentials"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     credential_type = Column(String(50), nullable=False)  # fingerprint, face_id, voice, webauthn
     credential_id = Column(String(255), nullable=False, unique=True)
     public_key = Column(Text, nullable=True)
@@ -198,8 +198,8 @@ class BiometricCredential(Base):
 class FiatTransaction(Base):
     __tablename__ = "fiat_transactions"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     transaction_type = Column(String(20), nullable=False)  # deposit, withdraw
     fiat_amount = Column(Numeric(12, 2), nullable=False)
     fiat_currency = Column(String(3), default="USD")
@@ -218,8 +218,8 @@ class FiatTransaction(Base):
 class SwapTransaction(Base):
     __tablename__ = "swap_transactions"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     from_currency = Column(String(10), nullable=False)
     to_currency = Column(String(10), nullable=False)
     from_amount = Column(Numeric(20, 8), nullable=False)
@@ -238,8 +238,8 @@ class SwapTransaction(Base):
 class UnlimitCard(Base):
     __tablename__ = "unlimit_cards"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     unlimit_card_id = Column(String(100), unique=True, nullable=False, index=True)
     unlimit_user_id = Column(String(100), nullable=False, index=True)
     card_type = Column(String(20), nullable=False)  # virtual, physical
@@ -262,9 +262,9 @@ class UnlimitCard(Base):
 class UnlimitTransaction(Base):
     __tablename__ = "unlimit_transactions"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    card_id = Column(UUID(as_uuid=True), ForeignKey("unlimit_cards.id"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    card_id = Column(GUID, ForeignKey("unlimit_cards.id"), nullable=False)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     unlimit_transaction_id = Column(String(100), unique=True, nullable=False, index=True)
     transaction_type = Column(String(30), nullable=False)  # authorization, settlement, refund
     amount = Column(Numeric(20, 8), nullable=False)
@@ -291,7 +291,7 @@ class UnlimitTransaction(Base):
 class UnlimitWebhook(Base):
     __tablename__ = "unlimit_webhooks"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     webhook_id = Column(String(100), unique=True, nullable=False, index=True)
     event_type = Column(String(50), nullable=False)  # card.transaction.authorized, etc.
     status = Column(String(20), default="received")  # received, processed, failed
@@ -307,8 +307,8 @@ class UnlimitWebhook(Base):
 class FeeCollection(Base):
     __tablename__ = "fee_collections"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    transaction_id = Column(UUID(as_uuid=True), ForeignKey("transactions.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    transaction_id = Column(GUID, ForeignKey("transactions.id"), nullable=False)
     currency_type = Column(String(10), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)
     fee_percentage = Column(Numeric(5, 2), nullable=False)  # Fee percentage in basis points
@@ -327,7 +327,7 @@ class FeeCollection(Base):
 class FeeWithdrawal(Base):
     __tablename__ = "fee_withdrawals"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     currency_type = Column(String(10), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)
     destination_address = Column(String(66), nullable=False)
@@ -342,8 +342,8 @@ class FeeWithdrawal(Base):
 class Notification(Base):
     __tablename__ = "notifications"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     type = Column(String(50), nullable=False)  # payment_request, payment_received, payment_sent, system
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
@@ -360,8 +360,8 @@ class Notification(Base):
 class TransactionLimit(Base):
     __tablename__ = "transaction_limits"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     limit_type = Column(String(20), nullable=False)  # daily, weekly, monthly
     currency_type = Column(String(10), nullable=False)  # APT, USDC, etc.
     limit_amount = Column(Numeric(20, 8), nullable=False)
@@ -379,8 +379,8 @@ class TransactionLimit(Base):
 class SpendingControl(Base):
     __tablename__ = "spending_controls"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     control_type = Column(String(30), nullable=False)  # max_amount, merchant_category, geographic, time_based
     currency_type = Column(String(10), nullable=False)
     max_amount = Column(Numeric(20, 8), nullable=True)
@@ -399,16 +399,16 @@ class SpendingControl(Base):
 class TransactionApproval(Base):
     __tablename__ = "transaction_approvals"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    transaction_id = Column(UUID(as_uuid=True), ForeignKey("transactions.id"), nullable=True)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    transaction_id = Column(GUID, ForeignKey("transactions.id"), nullable=True)
     approval_type = Column(String(30), nullable=False)  # high_value, suspicious, manual_review
     amount = Column(Numeric(20, 8), nullable=False)
     currency_type = Column(String(10), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(20), default="pending")  # pending, approved, rejected, expired
     approval_method = Column(String(30), nullable=True)  # mfa, email, sms, manual
-    approved_by = Column(UUID(as_uuid=True), nullable=True)  # User ID who approved
+    approved_by = Column(GUID, nullable=True)  # User ID who approved
     approved_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -422,14 +422,14 @@ class TransactionApproval(Base):
 class EmergencyBlock(Base):
     __tablename__ = "emergency_blocks"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     block_type = Column(String(30), nullable=False)  # account_freeze, transaction_block, card_block
     reason = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
-    blocked_by = Column(UUID(as_uuid=True), nullable=True)  # User ID who initiated block
-    unblocked_by = Column(UUID(as_uuid=True), nullable=True)  # User ID who unblocked
+    blocked_by = Column(GUID, nullable=True)  # User ID who initiated block
+    unblocked_by = Column(GUID, nullable=True)  # User ID who unblocked
     unblocked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -441,8 +441,8 @@ class EmergencyBlock(Base):
 class SpendingAlert(Base):
     __tablename__ = "spending_alerts"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     alert_type = Column(String(30), nullable=False)  # limit_threshold, unusual_spending, large_transaction
     limit_type = Column(String(20), nullable=True)  # daily, weekly, monthly
     threshold_percentage = Column(Numeric(5, 2), nullable=True)  # 80% of limit
@@ -461,9 +461,9 @@ class SpendingAlert(Base):
 class FamilyAccount(Base):
     __tablename__ = "family_accounts"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    parent_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    child_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    parent_user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    child_user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     relationship_type = Column(String(20), nullable=False)  # parent, guardian, family_member
     spending_limit = Column(Numeric(20, 8), nullable=True)
     currency_type = Column(String(10), nullable=False)
@@ -479,10 +479,10 @@ class FamilyAccount(Base):
 class BusinessAccount(Base):
     __tablename__ = "business_accounts"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id = Column(UUID(as_uuid=True), nullable=False)
-    admin_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    employee_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    organization_id = Column(GUID, nullable=False)
+    admin_user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
+    employee_user_id = Column(GUID, ForeignKey("users.id"), nullable=False)
     role = Column(String(30), nullable=False)  # admin, manager, employee
     spending_limit = Column(Numeric(20, 8), nullable=True)
     currency_type = Column(String(10), nullable=False)
@@ -494,3 +494,16 @@ class BusinessAccount(Base):
     # Relationships
     admin_user = relationship("User", foreign_keys=[admin_user_id])
     employee_user = relationship("User", foreign_keys=[employee_user_id])
+
+
+class Waitlist(Base):
+    __tablename__ = "waitlist"
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    first_name = Column(String(255), nullable=False)
+    last_name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    country = Column(String(100), nullable=False)  # Selected country from dropdown
+    custom_country = Column(String(100), nullable=True)  # Custom country if "Other" is selected
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

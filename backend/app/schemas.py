@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
@@ -808,3 +808,34 @@ class RiskAssessmentResponse(BaseModel):
     recommendations: List[str] = []
     requires_additional_auth: bool = False
     estimated_processing_time: Optional[int] = None  # seconds
+
+
+# Waitlist schemas
+class WaitlistCreate(BaseModel):
+    """Schema for creating a waitlist entry"""
+    first_name: str
+    last_name: str
+    email: EmailStr
+    country: str  # Selected country from dropdown
+    custom_country: Optional[str] = None  # Custom country if "Other" is selected
+    
+    @model_validator(mode='after')
+    def validate_custom_country(self):
+        """Validate that custom_country is provided if country is 'Other'"""
+        if self.country == 'Other' and not self.custom_country:
+            raise ValueError('custom_country is required when country is "Other"')
+        return self
+
+
+class WaitlistResponse(BaseModel):
+    """Schema for waitlist response"""
+    id: uuid.UUID
+    first_name: str
+    last_name: str
+    email: str
+    country: str
+    custom_country: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
