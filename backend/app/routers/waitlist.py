@@ -81,9 +81,11 @@ async def get_waitlist_entries(
     """
     entries = db.query(Waitlist).offset(skip).limit(limit).all()
     
+    entries_data = [WaitlistResponse.model_validate(entry).model_dump() for entry in entries]
+    
     return ApiResponse(
         success=True,
         message="Waitlist entries retrieved successfully",
-        data=[WaitlistResponse.model_validate(entry).model_dump() for entry in entries]
+        data={"entries": entries_data, "count": len(entries_data)}
     )
 

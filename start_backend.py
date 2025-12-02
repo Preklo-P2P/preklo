@@ -37,18 +37,36 @@ def main():
     
     # Run database migrations from root directory (where alembic.ini is located)
     print("Running database migrations...")
-    print(f"Using DATABASE_URL: {os.environ.get('DATABASE_URL', 'NOT SET')[:50]}...")
+    db_url = os.environ.get('DATABASE_URL', 'NOT SET')
+    if db_url != 'NOT SET':
+        print(f"Using DATABASE_URL: {db_url[:50]}...")
+    else:
+        print("WARNING: DATABASE_URL not set - migrations will fail")
+    
     try:
         # Ensure environment variables are passed to the subprocess
         env = os.environ.copy()
-        subprocess.run([sys.executable, '-m', 'alembic', 'upgrade', 'head'], check=True, env=env)
-        print("Database migrations completed")
+        result = subprocess.run(
+            [sys.executable, '-m', 'alembic', 'upgrade', 'head'],
+            check=True,
+            env=env,
+            capture_output=True,
+            text=True
+        )
+        print("Database migrations completed successfully")
+        if result.stdout:
+            print(f"Migration output: {result.stdout[:200]}")
     except subprocess.CalledProcessError as e:
-        print(f"Migration failed: {e}")
-        print("Continuing without migrations...")
+        print(f"Migration failed with exit code {e.returncode}")
+        if e.stdout:
+            print(f"Migration stdout: {e.stdout[:500]}")
+        if e.stderr:
+            print(f"Migration stderr: {e.stderr[:500]}")
+        print("WARNING: Continuing without migrations - app may not work correctly")
+        print("Please run migrations manually: railway run alembic upgrade head")
     except Exception as e:
         print(f"Migration error: {e}")
-        print("Continuing without migrations...")
+        print("WARNING: Continuing without migrations - app may not work correctly")
     
     # Change to backend directory for uvicorn
     backend_dir = os.path.join(os.path.dirname(__file__), 'backend')
