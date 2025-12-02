@@ -233,6 +233,20 @@ class RateLimitMiddleware:
         # Skip rate limiting for health checks
         if request.url.path in ["/health", "/", "/docs", "/openapi.json"]:
             return await call_next(request)
+
+        # Allow tests or specific contexts to override/disable the global limit
+        override_limit = None
+        override_window = None
+        if request.app:
+            override_limit = getattr(request.app.state, "global_rate_limit_override", None)
+            override_window = getattr(request.app.state, "global_rate_limit_window_override", None)
+
+        # If explicitly disabled, skip
+        if override_limit is not None and override_limit <= 0:
+            return await call_next(request)
+
+        effective_limit = override_limit if override_limit is not None else self.requests_per_minute
+        effective_window = override_window if override_window is not None else self.window_seconds
         
         # Get client IP
         client_ip = request.client.host
@@ -242,7 +256,7 @@ class RateLimitMiddleware:
         
         key = f"global_ip_{client_ip}"
         current_time = time.time()
-        window_start = current_time - self.window_seconds
+        window_start = current_time - effective_window
         
         # Clean old requests
         requests = rate_limit_storage[key]
@@ -250,11 +264,11 @@ class RateLimitMiddleware:
             requests.popleft()
         
         # Check limit
-        if len(requests) >= self.requests_per_minute:
+        if effective_limit and len(requests) >= effective_limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded: {self.requests_per_minute} requests per minute",
-                headers={"Retry-After": "60"}
+                detail=f"Rate limit exceeded: {effective_limit} requests per minute",
+                headers={"Retry-After": str(effective_window)}
             )
         
         # Add request

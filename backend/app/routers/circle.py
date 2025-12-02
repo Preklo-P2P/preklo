@@ -131,11 +131,13 @@ async def transfer_circle_usdc(
         db_transaction = Transaction(
             sender_id=current_user.id,
             recipient_id=current_user.id,  # Will be updated when recipient is identified
+            sender_address=current_user.wallet_address,
+            recipient_address=to_address,
             amount=amount,
             currency_type="USDC",
             status="pending",
-            type="circle_transfer",
-            transaction_hash=transfer_result.get("txHash")
+            transaction_type="transfer",
+            transaction_hash=transfer_result.get("txHash") or f"circle_{transfer_result.get('id', 'pending')}"
         )
         
         db.add(db_transaction)

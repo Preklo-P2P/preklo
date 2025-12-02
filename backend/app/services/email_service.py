@@ -186,6 +186,130 @@ class EmailService:
         
         return self._send_email(to_email, subject, text_content, html_content)
     
+    def send_sandbox_welcome_email(self, to_email: str, api_key: str, name: str) -> bool:
+        """
+        Send welcome email to new sandbox users with API key
+        """
+        dashboard_url = os.getenv("SANDBOX_DASHBOARD_URL", "http://localhost:3000/sandbox")
+        quick_start_url = f"{dashboard_url}/quick-start"
+        
+        subject = "Welcome to Preklo Sandbox - Your API Key"
+        
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Welcome to Preklo Sandbox</title>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background-color: #f8f9fa; padding: 20px; text-align: center; }
+                .content { padding: 20px; }
+                .api-key-box { 
+                    background-color: #f8f9fa; 
+                    border: 2px dashed #007bff; 
+                    padding: 15px; 
+                    margin: 20px 0;
+                    font-family: monospace;
+                    word-break: break-all;
+                    text-align: center;
+                    font-size: 14px;
+                }
+                .warning { 
+                    background-color: #fff3cd; 
+                    border-left: 4px solid #ffc107; 
+                    padding: 12px; 
+                    margin: 20px 0;
+                }
+                .button { 
+                    display: inline-block; 
+                    padding: 12px 24px; 
+                    background-color: #007bff; 
+                    color: white; 
+                    text-decoration: none; 
+                    border-radius: 5px; 
+                    margin: 20px 0;
+                }
+                .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Welcome to Preklo Sandbox!</h1>
+                </div>
+                <div class="content">
+                    <h2>Hello {{ name }}!</h2>
+                    <p>Your sandbox account has been created successfully. You can now start testing Preklo's API.</p>
+                    
+                    <h3>Your API Key</h3>
+                    <div class="api-key-box">{{ api_key }}</div>
+                    <div class="warning">
+                        <strong>⚠️ Important:</strong> This API key is shown only once. Save it securely now!
+                    </div>
+                    
+                    <h3>What's Next?</h3>
+                    <ul>
+                        <li>You have 5 pre-configured test accounts ready to use</li>
+                        <li>All existing API endpoints work with your sandbox API key</li>
+                        <li>Test transactions don't affect production</li>
+                    </ul>
+                    
+                    <a href="{{ dashboard_url }}" class="button">Go to Sandbox Dashboard</a>
+                    <a href="{{ quick_start_url }}" class="button" style="background-color: #28a745;">Quick Start Guide</a>
+                    
+                    <h3>Getting Started</h3>
+                    <p>Use your API key in the <code>X-API-Key</code> header for all API requests:</p>
+                    <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 5px;">curl -H "X-API-Key: {{ api_key }}" https://sandbox-api.preklo.com/api/v1/...</pre>
+                </div>
+                <div class="footer">
+                    <p>This email was sent from Preklo Sandbox. Questions? Reply to this email.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        text_content = f"""
+        Hello {name}!
+        
+        Welcome to Preklo Sandbox!
+        
+        Your sandbox account has been created successfully. You can now start testing Preklo's API.
+        
+        YOUR API KEY (SAVE THIS - SHOWN ONLY ONCE):
+        {api_key}
+        
+        ⚠️ Important: This API key is shown only once. Save it securely now!
+        
+        What's Next?
+        - You have 5 pre-configured test accounts ready to use
+        - All existing API endpoints work with your sandbox API key
+        - Test transactions don't affect production
+        
+        Dashboard: {dashboard_url}
+        Quick Start: {quick_start_url}
+        
+        Getting Started:
+        Use your API key in the X-API-Key header for all API requests:
+        
+        curl -H "X-API-Key: {api_key}" https://sandbox-api.preklo.com/api/v1/...
+        
+        Questions? Reply to this email.
+        
+        Thank you for trying Preklo Sandbox!
+        """
+        
+        html_content = Template(html_template).render(
+            name=name,
+            api_key=api_key,
+            dashboard_url=dashboard_url,
+            quick_start_url=quick_start_url
+        )
+        
+        return self._send_email(to_email, subject, text_content, html_content)
+    
     def _send_email(self, to_email: str, subject: str, text_content: str, html_content: str) -> bool:
         """
         Send email using SMTP

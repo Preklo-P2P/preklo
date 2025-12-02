@@ -79,13 +79,20 @@ async def get_waitlist_entries(
     Get waitlist entries (for admin/internal use).
     Returns paginated list of waitlist entries.
     """
-    entries = db.query(Waitlist).offset(skip).limit(limit).all()
-    
-    entries_data = [WaitlistResponse.model_validate(entry).model_dump() for entry in entries]
-    
-    return ApiResponse(
-        success=True,
-        message="Waitlist entries retrieved successfully",
-        data={"entries": entries_data, "count": len(entries_data)}
-    )
+    try:
+        entries = db.query(Waitlist).offset(skip).limit(limit).all()
+        
+        entries_data = [WaitlistResponse.model_validate(entry).model_dump() for entry in entries]
+        
+        return ApiResponse(
+            success=True,
+            message="Waitlist entries retrieved successfully",
+            data={"entries": entries_data, "count": len(entries_data)}
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving waitlist entries: {str(e)}"
+        )
 

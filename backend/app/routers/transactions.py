@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..database import get_db
 from ..models import User, Transaction, Balance
+from ..models.sandbox import SandboxAPIKey, TestAccount
 from ..schemas import (
     TransferRequest, 
     Transaction as TransactionSchema, 
@@ -21,7 +22,12 @@ from ..services.aptos_service import aptos_service
 from ..services.wallet_service import wallet_service
 from ..services.auth_service import auth_service
 from ..services.fee_service import fee_service
+from ..services.sandbox_transaction_service import sandbox_transaction_service
+from ..services.test_account_service import test_account_service
 from ..dependencies import require_authentication
+from ..dependencies.unified_auth import require_unified_auth, is_sandbox_request
+from ..dependencies.schema_aware_db import get_schema_aware_db
+from typing import Union
 
 router = APIRouter()
 
@@ -29,11 +35,75 @@ router = APIRouter()
 @router.post("/transfer", response_model=TransactionResponse)
 async def create_transfer(
     transfer: TransferRequest,
-    sender_private_key: str,
-    current_user: User = Depends(require_authentication),
-    db: Session = Depends(get_db)
+    sender_private_key: Optional[str] = None,
+    sender_account_id: Optional[str] = None,  # For sandbox mode
+    recipient_account_id: Optional[str] = None,  # For sandbox mode
+    auth_result: Union[User, SandboxAPIKey] = Depends(require_unified_auth),
+    db: Session = Depends(get_schema_aware_db),
+    is_sandbox: bool = Depends(is_sandbox_request)
 ):
-    """Create a new transfer transaction"""
+    """Create a new transfer transaction (supports both production and sandbox)"""
+    
+    # Handle sandbox mode
+    if is_sandbox:
+        if not isinstance(auth_result, SandboxAPIKey):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key authentication required for sandbox transactions"
+            )
+        
+        if not sender_account_id or not recipient_account_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sandbox transactions require sender_account_id and recipient_account_id"
+            )
+        
+        sandbox_user_id = str(auth_result.sandbox_user_id)
+        
+        try:
+            # Process sandbox transaction (no blockchain calls)
+            transaction_data = sandbox_transaction_service.process_sandbox_transfer(
+                db=db,
+                sender_account_id=sender_account_id,
+                recipient_account_id=recipient_account_id,
+                amount=transfer.amount,
+                currency_type=transfer.currency_type,
+                sandbox_user_id=sandbox_user_id,
+                description=transfer.description
+            )
+            
+            return TransactionResponse(
+                success=True,
+                message="Transaction processed successfully",
+                transaction_id=transaction_data["id"],
+                transaction_hash=transaction_data["transaction_hash"],
+                status="confirmed"
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to process sandbox transaction"
+            )
+    
+    # Production mode - original logic
+    if not isinstance(auth_result, User):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="JWT authentication required for production transactions"
+        )
+    
+    current_user = auth_result
+    
+    if not sender_private_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sender_private_key is required for production transactions"
+        )
     
     # Determine if recipient is username or address
     recipient_user = None
@@ -57,8 +127,7 @@ async def create_transfer(
             # This allows transfers to any valid Aptos address
             pass
     
-    # Get sender from private key (in a real app, this would come from authentication)
-    # For now, we'll need to derive the address from the private key
+    # Get sender from private key
     try:
         from aptos_sdk.account import Account
         sender_account = Account.load_key(sender_private_key)

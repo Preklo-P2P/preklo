@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Fee Collection Settings
     enable_fee_collection: bool = True
     
+    # Sandbox Configuration
+    sandbox_enabled: bool = False  # Enable/disable sandbox mode
+    sandbox_schema: str = "sandbox"  # PostgreSQL schema name for sandbox
+    production_schema: str = "public"  # PostgreSQL schema name for production
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

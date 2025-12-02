@@ -6,7 +6,7 @@ Handles user login, token refresh, password reset, and API key management
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from decimal import Decimal
 import logging
 
@@ -22,7 +22,7 @@ from ..services.auth_service import auth_service
 from ..services.wallet_service import wallet_service
 from ..services.aptos_service import aptos_service
 from ..services.email_service import email_service
-from ..dependencies import require_authentication, get_current_user
+from ..dependencies import require_authentication, get_current_user, get_current_user_or_api_key
 from ..utils.validation import InputValidator
 
 logger = logging.getLogger("preklo.auth")
@@ -626,7 +626,7 @@ async def create_api_key(
 
 
 @router.get("/api-key/validate")
-async def validate_api_key(current_user: User = Depends(get_current_user)):
+async def validate_api_key(current_user: Optional[User] = Depends(get_current_user_or_api_key)):
     """
     Validate current API key or token
     """

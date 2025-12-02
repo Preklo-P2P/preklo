@@ -10,9 +10,15 @@ from decimal import Decimal
 
 from ..database import get_db
 from ..models import User
+from ..models.sandbox import SandboxAPIKey
 from ..schemas import ApiResponse
 from ..services.receive_money_service import receive_money_service
+from ..services.test_account_service import test_account_service
 from ..dependencies import require_authentication, rate_limit
+from ..dependencies.unified_auth import require_unified_auth, is_sandbox_request
+from ..dependencies.schema_aware_db import get_schema_aware_db
+from ..dependencies.sandbox_rate_limit import sandbox_rate_limit
+from typing import Union
 
 router = APIRouter()
 
@@ -77,14 +83,80 @@ async def get_received_transaction_details(
 @router.get("/balance", response_model=Dict[str, Any])
 async def get_user_balance(
     currency_type: str = Query("APT", description="Currency type (APT, USDC)"),
-    current_user: User = Depends(require_authentication),
-    db: Session = Depends(get_db),
-    _rate_limit: bool = Depends(rate_limit(max_requests=60, window_seconds=60))
+    account_id: Optional[str] = None,  # For sandbox mode
+    auth_result: Union[User, SandboxAPIKey] = Depends(require_unified_auth),
+    db: Session = Depends(get_schema_aware_db),
+    is_sandbox: bool = Depends(is_sandbox_request)
 ):
     """
-    Get current balance for the user
+    Get current balance for the user.
+    Supports both production (JWT) and sandbox (API key) modes.
+    Rate limiting is applied via unified_auth dependency.
     """
+    # Validate auth type (rate limiting handled in unified_auth)
+    if is_sandbox:
+        if not isinstance(auth_result, SandboxAPIKey):
+            raise HTTPException(status_code=403, detail="API key required for sandbox")
+    else:
+        if not isinstance(auth_result, User):
+            raise HTTPException(status_code=403, detail="JWT token required")
+    
     try:
+        # Sandbox mode: return test account balance
+        if is_sandbox:
+            sandbox_user_id = str(auth_result.sandbox_user_id)
+            
+            if account_id:
+                # Get specific account balance
+                account = test_account_service.get_test_account(
+                    db, account_id, sandbox_user_id
+                )
+                if not account:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Test account not found"
+                    )
+                
+                if currency_type.upper() == "USDC":
+                    balance = account.usdc_balance
+                elif currency_type.upper() == "APT":
+                    balance = account.apt_balance
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid currency type. Use USDC or APT"
+                    )
+                
+                return {
+                    "balance": str(balance),
+                    "currency_type": currency_type.upper(),
+                    "wallet_address": account.wallet_address,
+                    "account_id": str(account.id),
+                    "username": account.username
+                }
+            else:
+                # Return total balance across all accounts
+                accounts = test_account_service.get_test_accounts(db, sandbox_user_id)
+                total_balance = Decimal("0")
+                
+                for account in accounts:
+                    if currency_type.upper() == "USDC":
+                        total_balance += account.usdc_balance
+                    elif currency_type.upper() == "APT":
+                        total_balance += account.apt_balance
+                
+                return {
+                    "balance": str(total_balance),
+                    "currency_type": currency_type.upper(),
+                    "account_count": len(accounts),
+                    "note": "Total balance across all test accounts"
+                }
+        
+        # Production mode: use original service
+        if not isinstance(auth_result, User):
+            raise HTTPException(status_code=403, detail="JWT token required")
+        
+        current_user = auth_result
         balance = await receive_money_service.get_user_balance(
             current_user, currency_type.upper(), db
         )
@@ -95,6 +167,8 @@ async def get_user_balance(
             "wallet_address": current_user.wallet_address
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
