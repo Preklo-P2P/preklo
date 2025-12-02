@@ -101,14 +101,15 @@ class UserContextMiddleware(BaseHTTPMiddleware):
         if auth_header and auth_header.startswith("Bearer "):
             try:
                 from ..services.auth_service import auth_service
-                from ..database import SessionLocal
+                from ..database import SessionLocal, get_session_local
                 
                 token = auth_header.split(" ")[1]
                 payload = auth_service.verify_token(token)
                 
                 if payload and payload.get("sub"):
                     # Get user from database
-                    db = SessionLocal()
+                    session_local = SessionLocal if SessionLocal is not None else get_session_local()
+                    db = session_local()
                     try:
                         from ..models import User
                         user = db.query(User).filter(User.id == payload["sub"]).first()

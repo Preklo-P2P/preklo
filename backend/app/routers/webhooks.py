@@ -87,9 +87,10 @@ async def process_unlimit_webhook(webhook_id: str, webhook_data: dict):
     """
     Background task to process Unlimit webhook events
     """
-    from ..database import SessionLocal
+    from ..database import SessionLocal, get_session_local
     
-    db = SessionLocal()
+    session_local = SessionLocal if SessionLocal is not None else get_session_local()
+    db = session_local()
     try:
         # Get webhook record
         webhook = db.query(UnlimitWebhook).filter(

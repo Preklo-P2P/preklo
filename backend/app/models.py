@@ -3,11 +3,21 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 
-# Try relative import first (normal case), fall back to absolute import (when loaded as separate module)
+# Try multiple import strategies to handle different loading contexts
 try:
     from .database import GUID, Base
-except ImportError:
-    from app.database import GUID, Base
+except (ImportError, AttributeError):
+    try:
+        from app.database import GUID, Base
+    except (ImportError, AttributeError):
+        # Last resort: import database module and get attributes directly
+        import sys
+        import os
+        # Add parent directory to path if needed
+        backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if backend_path not in sys.path:
+            sys.path.insert(0, backend_path)
+        from app.database import GUID, Base
 
 
 class User(Base):
