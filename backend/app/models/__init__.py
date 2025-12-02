@@ -5,14 +5,24 @@ Provides access to both production models (models.py) and sandbox models (sandbo
 # Import Base from database for compatibility
 from ..database import Base
 
-# Import all sandbox models for easy access
-from .sandbox import (  # noqa: F401
-    TestAccount,
-    SandboxAPIKey,
-    WebhookSubscription,
-    WebhookDelivery,
-    SandboxAnalytics
-)
+# Import all sandbox models for easy access (optional - may not exist in all deployments)
+try:
+    from .sandbox import (  # noqa: F401
+        TestAccount,
+        SandboxAPIKey,
+        WebhookSubscription,
+        WebhookDelivery,
+        SandboxAnalytics
+    )
+    _sandbox_available = True
+except ImportError:
+    # Sandbox models not available - create dummy classes for compatibility
+    _sandbox_available = False
+    TestAccount = None
+    SandboxAPIKey = None
+    WebhookSubscription = None
+    WebhookDelivery = None
+    SandboxAnalytics = None
 
 # For production models, import directly from models.py module (not this package)
 # This avoids circular imports. Code should use: from app.models import User
@@ -63,10 +73,15 @@ __all__ = [
     'FeeCollection', 'FeeWithdrawal', 'FamilyAccount', 'BusinessAccount',
     'FiatTransaction', 'SwapTransaction', 'UnlimitTransaction', 'UnlimitWebhook',
     'Waitlist',
-    'TestAccount',
-    'SandboxAPIKey',
-    'WebhookSubscription',
-    'WebhookDelivery',
-    'SandboxAnalytics',
 ]
+
+# Add sandbox models to __all__ only if available
+if _sandbox_available:
+    __all__.extend([
+        'TestAccount',
+        'SandboxAPIKey',
+        'WebhookSubscription',
+        'WebhookDelivery',
+        'SandboxAnalytics',
+    ])
 
