@@ -1,9 +1,13 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Numeric, Text, ForeignKey, JSON
-from .database import GUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from .database import Base
 import uuid
+
+# Try relative import first (normal case), fall back to absolute import (when loaded as separate module)
+try:
+    from .database import GUID, Base
+except ImportError:
+    from app.database import GUID, Base
 
 
 class User(Base):
