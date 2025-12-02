@@ -9,7 +9,12 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    """Simple health check endpoint for Railway deployment"""
+    """
+    Simple health check endpoint for Railway deployment.
+    Returns 200 OK if the API is running.
+    This endpoint does not check database connectivity to ensure
+    Railway health checks pass even if DB is temporarily unavailable.
+    """
     return {
         "status": "healthy",
         "message": "Preklo API is running",
