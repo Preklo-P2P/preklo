@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
 from ..models import Waitlist
 from ..schemas import WaitlistCreate, WaitlistResponse, ApiResponse
+from ..dependencies import rate_limit
 
 router = APIRouter()
 
@@ -12,7 +13,9 @@ router = APIRouter()
 @router.post("/", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
 async def join_waitlist(
     waitlist_entry: WaitlistCreate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    _rate_limit: bool = Depends(rate_limit(max_requests=10, window_seconds=3600, per="ip"))
 ):
     """
     Join the waitlist with name, surname, email, and country.
@@ -66,33 +69,5 @@ async def join_waitlist(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error joining waitlist: {str(e)}"
-        )
-
-
-@router.get("/", response_model=ApiResponse)
-async def get_waitlist_entries(
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
-    """
-    Get waitlist entries (for admin/internal use).
-    Returns paginated list of waitlist entries.
-    """
-    try:
-        entries = db.query(Waitlist).offset(skip).limit(limit).all()
-        
-        entries_data = [WaitlistResponse.model_validate(entry).model_dump() for entry in entries]
-        
-        return ApiResponse(
-            success=True,
-            message="Waitlist entries retrieved successfully",
-            data={"entries": entries_data, "count": len(entries_data)}
-        )
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving waitlist entries: {str(e)}"
         )
 

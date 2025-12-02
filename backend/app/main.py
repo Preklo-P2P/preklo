@@ -34,11 +34,24 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+# In production, restrict to preklo.com domain only
+if settings.debug:
+    # Development - allow all origins
+    allow_origins = ["*"]
+else:
+    # Production - only allow requests from preklo.com
+    allow_origins = [
+        "https://preklo.com",
+        "https://www.preklo.com",
+        "http://localhost:3000",  # For local development
+        "http://localhost:8080",  # For local development
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
